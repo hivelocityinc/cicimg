@@ -1,9 +1,75 @@
-version: 2.1
+aliases:
+  - &remote-docker
+    version: 18.09.3
+    docker_layer_caching: true
+  - &filter-only-release-tag-required
+    tags:
+      only:
+        - /^v\d+\.\d+\.\d+$/
+  - &filter-only-release-tag
+    tags:
+      only:
+        - /^v\d+\.\d+\.\d+$/
+    branches:
+      ignore: /.*/
 
-orbs:
-  welcome: circleci/welcome-orb@0.3.1
+defaults: &defaults
+  working_directory: ~/workspace
+
+python_defaults: &python_defaults
+  <<: *defaults
+  docker:
+    - image: circleci/python:2.7-jessie-node-browsers
+
+version: 2
+jobs:
+  checkout:
+    <<: *python_defaults
+    steps:
+      - checkout
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+  build:
+    <<: *python_defaults
+    steps:
+      - attach_workspace:
+          at: .
+      - setup_remote_docker: *remote-docker
+      - run:
+          name: Build image
+          command: |
+            docker build -t cicimg .
+  release:
+    <<: *python_defaults
+    environment:
+      REPO_NAME: hivelocityinc/cicimg
+      IMAGE_VERSION: 0.1.0
+    steps:
+      - attach_workspace:
+          at: .
+      - setup_remote_docker: *remote-docker
+      - run:
+          name: Release to Docker Hub
+          command: |
+            docker build -t $REPO_NAME .
+            docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+            docker tag $REPO_NAME:latest $REPO_NAME:$IMAGE_VERSION
+            docker push $REPO_NAME:latest
+            docker push $REPO_NAME:$IMAGE_VERSION
 
 workflows:
-  Welcome:
+  version: 2
+  build_test:
     jobs:
-      - welcome/run
+      - checkout:
+          filters: *filter-only-release-tag-required
+      - build:
+          requires:
+            - checkout
+          filters: *filter-only-release-tag-required
+      - release:
+          requires:
+            - build
+          filters: *filter-only-release-tag
